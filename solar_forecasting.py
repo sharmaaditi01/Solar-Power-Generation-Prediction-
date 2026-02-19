@@ -12,166 +12,159 @@
 # ✔ Saves results
 # ============================================================
 
-import pandas as pd
+# ==============================
+# 1. IMPORT LIBRARIES
+# ==============================
+
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.pipeline import Pipeline
-
-from sklearn.svm import SVR
+from sklearn.model_selection import train_test_split, KFold
+from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
-from sklearn.naive_bayes import GaussianNB
+from sklearn.svm import SVR
 from sklearn.neighbors import KNeighborsRegressor
 
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
-# =====================
-# 1. Read Dataset
-# =====================
+# ==============================
+# 2. LOAD DATA
+# ==============================
 
-FILE_PATH = "Solar Power Plant Data.csv"
-df = pd.read_csv(FILE_PATH)
+df = pd.read_csv("Solar Power Plant Data.csv")
 
-print("\nDataset Loaded Successfully")
-print("Shape:", df.shape)
+# Convert date column
+df["Date-Hour(NMT)"] = pd.to_datetime(df["Date-Hour(NMT)"], format="mixed")
 
-# =====================
-# 2. Data Cleaning
-# =====================
+# ==============================
+# 3. BASIC CLEANING
+# ==============================
 
-print("\nCleaning Dataset...")
+# Remove duplicates
+df = df.drop_duplicates()
 
-df.drop_duplicates(inplace=True)
-df.dropna(inplace=True)
-df.reset_index(drop=True, inplace=True)
+# Check missing values
+print("Missing values:\n", df.isna().sum())
 
-print("Cleaning Completed")
-print("New Shape:", df.shape)
+# Handle negative radiation (night values)
+df.loc[df["Radiation"] < 0, "Radiation"] = 0
 
-# =====================
-# 3. Automatic Target Selection
-# =====================
-# Assumes LAST numeric column is the output (standard ML format)
+# ==============================
+# 4. FEATURE ENGINEERING
+# ==============================
 
-numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+df["month"] = df["Date-Hour(NMT)"].dt.month
+df["day"] = df["Date-Hour(NMT)"].dt.day
+df["hour"] = df["Date-Hour(NMT)"].dt.hour
 
-if len(numeric_cols) < 2:
-    raise ValueError("Dataset must contain multiple numeric columns.")
+# ==============================
+# 5. VISUALIZATION
+# ==============================
 
-TARGET_COLUMN = numeric_cols[-1]   # Automatically chosen
-FEATURE_COLUMNS = numeric_cols[:-1]
+plt.figure(figsize=(12,6))
+plt.plot(df["Date-Hour(NMT)"], df["SystemProduction"])
+plt.title("System Production Over Time")
+plt.show()
 
-print(f"\nAutomatically Selected Target Column: {TARGET_COLUMN}")
+# Correlation heatmap
+plt.figure(figsize=(10,8))
+sns.heatmap(df.corr(), annot=True, cmap="coolwarm")
+plt.title("Correlation Heatmap")
+plt.show()
 
-X = df[FEATURE_COLUMNS]
-y = df[TARGET_COLUMN]
+# ==============================
+# 6. SELECT FEATURES & TARGET
+# ==============================
 
-# =====================
-# 4. Preprocessing
-# Z-score Standardization + Normalization
-# =====================
+features = [
+    'WindSpeed',
+    'Sunshine',
+    'AirPressure',
+    'Radiation',
+    'AirTemperature',
+    'RelativeAirHumidity',
+    'month',
+    'day',
+    'hour'
+]
 
-print("\nApplying Scaling (Z-score + MinMax)...")
+X = df[features]
+y = df["SystemProduction"]
 
-scaling_pipeline = Pipeline([
-    ("zscore", StandardScaler()),
-    ("normalize", MinMaxScaler())
-])
+# ==============================
+# 7. NORMALIZATION
+# ==============================
 
-X_scaled = scaling_pipeline.fit_transform(X)
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
-# =====================
-# 5. Train-Test Split
-# =====================
+# ==============================
+# 8. TRAIN TEST SPLIT
+# ==============================
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y, test_size=0.2, random_state=42
+    X_scaled, y, test_size=0.3, random_state=42
 )
 
-print("Train-Test Split Completed")
+# ==============================
+# 9. MODEL 1 – LINEAR REGRESSION
+# ==============================
 
-# =====================
-# 6. Visualization
-# =====================
+lr = LinearRegression()
+lr.fit(X_train, y_train)
 
-print("\nGenerating Visualizations...")
+y_pred_lr = lr.predict(X_test)
 
-plt.figure(figsize=(10,6))
-sns.heatmap(df[numeric_cols].corr(), annot=True, cmap="coolwarm")
-plt.title("Correlation Heatmap")
-plt.tight_layout()
-plt.savefig("correlation_heatmap.png")
-plt.close()
+lr_rmse = np.sqrt(mean_squared_error(y_test, y_pred_lr))
+lr_mae = mean_absolute_error(y_test, y_pred_lr)
+lr_r2 = r2_score(y_test, y_pred_lr)
 
-df[numeric_cols].hist(figsize=(12,10), bins=25)
-plt.suptitle("Feature Distributions")
-plt.tight_layout()
-plt.savefig("feature_distributions.png")
-plt.close()
+# ==============================
+# 10. MODEL 2 – SVM
+# ==============================
 
-print("Plots saved as PNG files")
+svm = SVR(kernel='linear')
+svm.fit(X_train, y_train)
 
-# =====================
-# 7. Initialize Models
-# =====================
+y_pred_svm = svm.predict(X_test)
 
-models = {
-    "Support Vector Machine": SVR(kernel='rbf'),
-    "Linear Regression": LinearRegression(),
-    "Naive Bayes": GaussianNB(),
-    "K-Nearest Neighbors": KNeighborsRegressor(n_neighbors=5)
-}
+svm_rmse = np.sqrt(mean_squared_error(y_test, y_pred_svm))
+svm_mae = mean_absolute_error(y_test, y_pred_svm)
+svm_r2 = r2_score(y_test, y_pred_svm)
 
-# =====================
-# 8. Evaluation Function
-# =====================
+# ==============================
+# 11. MODEL 3 – KNN
+# ==============================
 
-def evaluate_model(name, model):
-    model.fit(X_train, y_train)
-    predictions = model.predict(X_test)
+knn = KNeighborsRegressor(n_neighbors=5)
+knn.fit(X_train, y_train)
 
-    mae = mean_absolute_error(y_test, predictions)
-    rmse = np.sqrt(mean_squared_error(y_test, predictions))
-    r2 = r2_score(y_test, predictions)
+y_pred_knn = knn.predict(X_test)
 
-    print(f"\n{name} Results")
-    print("-" * 40)
-    print(f"MAE  : {mae:.4f}")
-    print(f"RMSE : {rmse:.4f}")
-    print(f"R2   : {r2:.4f}")
+knn_rmse = np.sqrt(mean_squared_error(y_test, y_pred_knn))
+knn_mae = mean_absolute_error(y_test, y_pred_knn)
+knn_r2 = r2_score(y_test, y_pred_knn)
 
-    return mae, rmse, r2
+# ==============================
+# 12. RESULTS COMPARISON
+# ==============================
 
-# =====================
-# 9. Train & Compare Models
-# =====================
+results = pd.DataFrame({
+    "Model": ["Linear Regression", "SVM", "KNN"],
+    "RMSE": [lr_rmse, svm_rmse, knn_rmse],
+    "MAE": [lr_mae, svm_mae, knn_mae],
+    "R2 Score": [lr_r2, svm_r2, knn_r2]
+})
 
-results = {}
+print("\nModel Performance Comparison:\n")
+print(results)
 
-for name, model in models.items():
-    results[name] = evaluate_model(name, model)
+# ==============================
+# 13. BEST MODEL
+# ==============================
 
-# =====================
-# 10. Save Results
-# =====================
-
-results_df = pd.DataFrame(results, index=["MAE", "RMSE", "R2"]).T
-results_df.to_csv("model_comparison_results.csv")
-
-print("\nModel comparison saved to model_comparison_results.csv")
-
-# =====================
-# 11. Save Processed Dataset
-# =====================
-
-processed_df = pd.DataFrame(X_scaled, columns=FEATURE_COLUMNS)
-processed_df[TARGET_COLUMN] = y.values
-processed_df.to_csv("processed_dataset.csv", index=False)
-
-print("Processed dataset saved.")
-
-print("\nPipeline Execution Completed Successfully.")
-# ============================================================
+best_model = results.sort_values(by="RMSE").iloc[0]
+print("\nBest Model Based on RMSE:")
+print(best_model)
